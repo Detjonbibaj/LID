@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyse</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.1.1/wordcloud2.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        header {
+            background-color: #222;
+            color: #fff;
+            padding: 1em;
+            text-align: center;
+        }
+
+        nav ul {
+            display: flex;
+            list-style-type: none;
+            background-color: #444;
+            padding: 0;
+            margin: 0;
+        }
+
+        nav ul li {
+            flex: 1;
+            text-align: center;
+        }
+
+        nav ul li a {
+            display: block;
+            padding: 1em;
+            color: white;
+            text-decoration: none;
+        }
+
+        nav ul li a:hover {
+            background-color: #666;
+        }
+
+        .panel {
+            width: 100%;
+            max-width: 1000px;
+            margin: 2em auto;
+            padding: 2em;
+            background-color: #f9f9f9;
+            border-radius: 12px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        canvas {
+            width: 100% !important;
+            height: auto !important;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1 class="title">Genius Lyrics - Analyse</h1>
+    </header>
+
+    <nav>
+        <ul>
+            <li><a href="{{ url_for('home') }}">Musik</a></li>
+            <li><a href="{{ url_for('analysis') }}">Analyse</a></li>
+            <li><a href="{{ url_for('home') }}">Künstler</a></li>
+            <li><a href="{{ url_for('home') }}">Videos</a></li>
+            <li><a href="{{ url_for('home') }}">About Us</a></li>
+        </ul>
+    </nav>
+
+    <div class="panel">
+        <h2>Top-Wörter pro Künstler</h2>
+    
+        <label for="genreSelect">Genre wählen:</label>
+        <select id="genreSelect"></select>
+    
+        <label for="languageSelect">Sprache wählen:</label>
+        <select id="languageSelect">
+            <option value="de">Deutsch</option>
+            <option value="en">Englisch</option>
+            <option value="fr">Französisch</option>
+            <option value="es">Spanisch</option>
+            <option value="it">Italienisch</option>
+        </select>
+    
+        <label for="artistSelect">Künstler wählen:</label>
+        <select id="artistSelect"></select>
+    
+        <canvas id="topWordsChart"></canvas>
+        <canvas id="wordcloudArtist" width="800" height="400" style="margin-top: 2em;"></canvas>
+    </div>
+    
+    <div class="panel">
+        <h2>Top-Wörter pro Genre</h2>
+        <label for="genreSelect2">Genre wählen:</label>
+        <select id="genreSelect2"></select>
+        <canvas id="genreTopWordsChart"></canvas>
+    </div>
+
+    <div class="panel">
+        <h2>Sentiment-Trend nach Jahr</h2>
+    
+        <label for="sentimentGenreSelect">Genre wählen:</label>
+        <select id="sentimentGenreSelect">
+            <option value="all" selected>Alle Genres</option>
+        </select>
+
+        <label for="sentimentLanguageSelect">Sprache wählen:</label>
+        <select id="sentimentLanguageSelect">
+            <option value="de" selected>Deutsch</option>
+            <option value="en">Englisch</option>
+            <option value="fr">Französisch</option>
+            <option value="es">Spanisch</option>
+            <option value="it">Italienisch</option>
+        </select>
+    
+        <canvas id="sentimentChart"></canvas>
+    </div>
+
+    <div class="panel">
+        <h2>Lyrische Komplexität vs. Popularität</h2>
+    
+        <label for="complexityLanguage">Sprache wählen:</label>
+        <select id="complexityLanguage">
+            <option value="de">Deutsch</option>
+            <option value="en">Englisch</option>
+            <option value="fr">Französisch</option>
+            <option value="es">Spanisch</option>
+            <option value="it">Italienisch</option>
+        </select>
+    
+        <label for="complexityGenre">Genre wählen:</label>
+        <select id="complexityGenre"></select>
+    
+        <canvas id="complexityChart"></canvas>
+    </div>
+
+    <div class="panel">
+        <h2>Länge der Lyrics vs. Views</h2>
+    
+        <label for="lyricsLanguageSelect">Sprache wählen:</label>
+        <select id="lyricsLanguageSelect">
+            <option value="de">Deutsch</option>
+            <option value="en">Englisch</option>
+            <option value="fr">Französisch</option>
+            <option value="es">Spanisch</option>
+            <option value="it">Italienisch</option>
+        </select>
+    
+        <label for="lyricsGenreSelect">Genre wählen:</label>
+        <select id="lyricsGenreSelect"></select>
+    
+        <canvas id="lyricsBubbleChart"></canvas>
+    </div>
+    
+    
+    
+    
+    
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            const genreSelect = document.getElementById("genreSelect");
+            const languageSelect = document.getElementById("languageSelect");
+            const artistSelect = document.getElementById("artistSelect");
+            const ctx = document.getElementById("topWordsChart").getContext("2d");
+            let chart;
+        
+            // Genre Dropdown befüllen
+            fetch("/api/genres")
+                .then(res => res.json())
+                .then(genres => {
+                    genreSelect.innerHTML = `<option disabled selected>Genre wählen</option>`;
+                    genres.forEach(g => {
+                        genreSelect.innerHTML += `<option value="${g}">${g}</option>`;
+                    });
+                });
+        
+            // Wenn Genre oder Sprache ausgewählt → Artists laden
+            function loadArtists() {
+                const genre = genreSelect.value;
+                const language = languageSelect.value;
+                artistSelect.innerHTML = "";
+                fetch(`/api/artists/${genre}/${language}`)
+                    .then(res => res.json())
+                    .then(artists => {
+                        artistSelect.innerHTML = `<option disabled selected>Künstler wählen</option>`;
+                        artists.forEach(a => {
+                            artistSelect.innerHTML += `<option value="${a}">${a}</option>`;
+                        });
+                    });
+            }
+        
+            genreSelect.addEventListener("change", loadArtists);
+            languageSelect.addEventListener("change", loadArtists);
+        
+            // Wenn Artist gewählt → Top Words anzeigen
+            artistSelect.addEventListener("change", function () {
+                const genre = genreSelect.value;
+                const artist = this.value;
+                const language = languageSelect.value;
+
+                fetch(`/api/top_words/${genre}/${artist}/${language}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        const labels = data.map(item => item[0]);
+                        const counts = data.map(item => item[1]);
+
+                        if (chart) chart.destroy();
+
+                        chart = new Chart(ctx, {
+                            type: 'bar',
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: 'Häufigkeit',
+                                    data: counts,
+                                    backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                                    borderColor: 'rgba(75, 192, 192, 1)',
+                                    borderWidth: 1
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                scales: {
+                                    y: {
+                                        beginAtZero: true
+                                    }
+                                }
+                            }
+                        });
+
+                        // === Wordcloud für Künstler ===
+                        const wordArray = data.map(([word, freq]) => [word, freq]);
+                        WordCloud(document.getElementById("wordcloudArtist"), {
+                            list: wordArray,
+                            gridSize: 16,
+                            weightFactor: size => Math.pow(size, 1.2),
+                            fontFamily: 'Arial',
+                            color: 'random-dark',
+                            backgroundColor: '#f9f9f9'
+                        });
+                    });
+            });
+
+        
+            // Initiale Künstler laden
+            loadArtists();
+        });
+
+
+        document.addEventListener("DOMContentLoaded", function () {
+            const genreSelect2 = document.getElementById("genreSelect2");
+            const ctx2 = document.getElementById("genreTopWordsChart").getContext("2d");
+            let genreChart;
+
+            
+            // Genre Dropdown für zweite Analyse füllen
+            fetch("/api/genres")
+                .then(res => res.json())
+                .then(genres => {
+                    genreSelect2.innerHTML = `<option disabled selected>Genre wählen</option>`;
+                    genres.forEach(g => {
+                        genreSelect2.innerHTML += `<option value="${g}">${g}</option>`;
+                    });
+                });
+
+            // Bei Auswahl → Daten laden für das zweite Panel
+            genreSelect2.addEventListener("change", function () {
+                const genre = this.value;
+
+                fetch(`/api/top_words_by_genre/${genre}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        const labels = data.map(item => item[0]);
+                        const counts = data.map(item => item[1]);
+
+                        if (genreChart) genreChart.destroy();
+
+                        genreChart = new Chart(ctx2, {
+                            type: 'bar',
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: 'Häufigkeit',
+                                    data: counts,
+                                    backgroundColor: 'rgba(153, 102, 255, 0.6)',
+                                    borderColor: 'rgba(153, 102, 255, 1)',
+                                    borderWidth: 1
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                scales: {
+                                    y: {
+                                        beginAtZero: true
+                                    }
+                                }
+                            }
+                        });
+                    });
+            });
+            // Initiale Daten laden
+            genreSelect2.dispatchEvent(new Event("change"));
+        });
+        
+        // Vor dem neuen WordCloud-Aufruf
+        const canvas = document.getElementById("wordcloudArtist");
+        const ctxCloud = canvas.getContext("2d");
+        ctxCloud.clearRect(0, 0, canvas.width, canvas.height);
+     
+
+
+
+        document.addEventListener("DOMContentLoaded", function () {
+            const sentimentGenreSelect = document.getElementById("sentimentGenreSelect");
+            const sentimentLanguageSelect = document.getElementById("sentimentLanguageSelect");
+            const ctx3 = document.getElementById("sentimentChart").getContext("2d");
+            let sentimentChart;
+
+            // Genres laden
+            fetch("/api/genres")
+                .then(res => res.json())
+                .then(genres => {
+                    genres.forEach(g => {
+                        sentimentGenreSelect.innerHTML += `<option value="${g}">${g}</option>`;
+                    });
+                    // Initiale Daten laden
+                    loadSentimentData(sentimentLanguageSelect.value, "all");
+                });
+
+            // Events
+            sentimentGenreSelect.addEventListener("change", function () {
+                loadSentimentData(sentimentLanguageSelect.value, this.value);
+            });
+
+            sentimentLanguageSelect.addEventListener("change", function () {
+                loadSentimentData(this.value, sentimentGenreSelect.value);
+            });
+
+            // Funktion zum Laden der Daten
+            function loadSentimentData(lang, genre) {
+                fetch(`/api/sentiment_by_year/${lang}/${genre}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        const labels = data.map(item => item._id);
+                        const scores = data.map(item => item.average_sentiment.toFixed(3));
+
+                        if (sentimentChart) sentimentChart.destroy();
+
+                        sentimentChart = new Chart(ctx3, {
+                            type: 'line',
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: 'Durchschnittlicher Sentiment Score',
+                                    data: scores,
+                                    fill: false,
+                                    borderColor: 'rgba(255, 99, 132, 1)',
+                                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                                    tension: 0.3
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                scales: {
+                                    y: {
+                                        beginAtZero: true,
+                                        max: 1
+                                    }
+                                }
+                            }
+                        });
+                    });
+            }
+        });
+
+
+        document.addEventListener("DOMContentLoaded", function () {
+            const complexityGenre = document.getElementById("complexityGenre");
+            const complexityLanguage = document.getElementById("complexityLanguage");
+            const ctx = document.getElementById("complexityChart").getContext("2d");
+            let scatterChart;
+
+            // Genres laden
+            fetch("/api/genres")
+                .then(res => res.json())
+                .then(genres => {
+                    genres.forEach(g => {
+                        complexityGenre.innerHTML += `<option value="${g}">${g}</option>`;
+                    });
+                    loadComplexityChart();
+                });
+
+            // Bei Änderung neu laden
+            complexityLanguage.addEventListener("change", loadComplexityChart);
+            complexityGenre.addEventListener("change", loadComplexityChart);
+
+            function loadComplexityChart() {
+                const lang = complexityLanguage.value;
+                const genre = complexityGenre.value;
+
+                if (!lang || !genre) return;
+
+                fetch(`/api/complexity_vs_popularity/${lang}/${genre}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        const points = data.map(d => ({
+                            x: d.vocab_richness,
+                            y: d.views,
+                            label: `${d.title} - ${d.artist}`
+                        }));
+
+                        if (scatterChart) scatterChart.destroy();
+
+                        scatterChart = new Chart(ctx, {
+                            type: 'scatter',
+                            data: {
+                                datasets: [{
+                                    label: 'Songs',
+                                    data: points,
+                                    backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                                    borderColor: 'rgba(54, 162, 235, 1)'
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                plugins: {
+                                    tooltip: {
+                                        callbacks: {
+                                            label: function (context) {
+                                                return context.raw.label + ` | Vielfalt: ${context.raw.x}, Views: ${context.raw.y}`;
+                                            }
+                                        }
+                                    }
+                                },
+                                scales: {
+                                    x: {
+                                        title: {
+                                            display: true,
+                                            text: 'Vokabularvielfalt (TTR)'
+                                        },
+                                        type: 'linear',
+                                        min: 0,
+                                        max: 1
+                                    
+                                    },
+                                    y: {
+                                        title: {
+                                            display: true,
+                                            text: 'views'
+                                        },
+                                        min: 0
+                                         
+                                    }
+                                }
+                            }
+                        });
+                    });
+            }
+        });
+
+
+        document.addEventListener("DOMContentLoaded", function () {
+            const lyricsLanguageSelect = document.getElementById("lyricsLanguageSelect");
+            const lyricsGenreSelect = document.getElementById("lyricsGenreSelect");
+            const bubbleCtx = document.getElementById("lyricsBubbleChart").getContext("2d");
+            let bubbleChart;
+
+            // Genres laden
+            fetch("/api/genres")
+                .then(res => res.json())
+                .then(genres => {
+                    genres.forEach(g => {
+                        lyricsGenreSelect.innerHTML += `<option value="${g}">${g}</option>`;
+                    });
+                    loadLyricsBubbleChart(); // Initialer Aufruf
+                });
+
+            lyricsLanguageSelect.addEventListener("change", loadLyricsBubbleChart);
+            lyricsGenreSelect.addEventListener("change", loadLyricsBubbleChart);
+
+            function loadLyricsBubbleChart() {
+                const lang = lyricsLanguageSelect.value;
+                const genre = lyricsGenreSelect.value;
+
+                if (!lang || !genre) return;
+
+                fetch(`/api/lyrics_length_vs_views/${lang}/${genre}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        const bubbles = data.map(d => ({
+                            x: d.lyrics_word_count,
+                            y: d.views,
+                            r: Math.max(4, d.vocab_richness * 25),
+                            label: `${d.title} – ${d.artist}`
+                        }));
+
+                        if (bubbleChart) bubbleChart.destroy();
+
+                        bubbleChart = new Chart(bubbleCtx, {
+                            type: 'bubble',
+                            data: {
+                                datasets: [{
+                                    label: 'Songs',
+                                    data: bubbles,
+                                    backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                                    borderColor: 'rgba(255, 159, 64, 1)'
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                plugins: {
+                                    tooltip: {
+                                        callbacks: {
+                                            label: function (ctx) {
+                                                const d = ctx.raw;
+                                                return `${d.label}
+        Wörter: ${d.x}
+        Views: ${d.y}
+        Vielfalt: ${(d.r / 25).toFixed(2)}`;
+                                            }
+                                        }
+                                    },
+                                    title: {
+                                        display: true,
+                                        text: 'Lyrics-Länge vs. Views (Bubble-Größe = Vokabularvielfalt)'
+                                    }
+                                },
+                                scales: {
+                                    x: {
+                                        title: {
+                                            display: true,
+                                            text: 'Lyrics-Länge (Wörter)'
+                                        }
+                                    },
+                                    y: {
+                                        title: {
+                                            display: true,
+                                            text: 'Views'
+                                        },
+                                        beginAtZero: true
+                                    }
+                                }
+                            }
+                        });
+                    });
+            }
+        });
+
+    </script>
+
+</body>
+</html>
